@@ -6,32 +6,32 @@ INF = math.inf
 
 class Graph:
     def __init__(self):
-        self.adj_list = {}
+        self.vertex_dict = {}
 
-    def add_edge(self, node1, node2, weight):
-        if node1 not in self.adj_list:
-            self.adj_list[node1] = {}
-        if node2 not in self.adj_list:
-            self.adj_list[node2] = {}
+    def add_edge(self, v1, v2, weight):
+        if v1 not in self.vertex_dict:
+            self.vertex_dict[v1] = {}
+        if v2 not in self.vertex_dict:
+            self.vertex_dict[v2] = {}
 
-        self.adj_list[node1][node2] = weight
-        self.adj_list[node2][node1] = weight
+        self.vertex_dict[v1][v2] = weight
+        self.vertex_dict[v2][v1] = weight
 
-    def remove_edge(self, node1, node2):
-        if node1 not in self.adj_list:
+    def remove_edge(self, v1, v2):
+        if v1 not in self.vertex_dict:
             return
-        if node2 not in self.adj_list:
+        if v2 not in self.vertex_dict:
             return
 
-        del self.adj_list[node1][node2]
-        del self.adj_list[node2][node1]
+        del self.vertex_dict[v1][v2]
+        del self.vertex_dict[v2][v1]
 
-    def get_neighbors(self, node):
-        return self.adj_list[node]
+    def get_neighbors(self, v):
+        return self.vertex_dict[v]
 
     def print_graph(self):
-        for node, neighbors in self.adj_list.items():
-            print(f"Node {node}: {neighbors}")
+        for v, neighbors in self.vertex_dict.items():
+            print(f"v {v}: {neighbors}")
 
 class Router:
     def __init__(self, name):
@@ -41,29 +41,29 @@ class Router:
         self.routing_table = {}
         self.update_neighbors = False
 
-    def initialize_distance_table(self, nodes):
-        nodes = nodes.copy()
-        if self._name in nodes:
-            nodes.remove(self._name)
-        for node in nodes:
-            self.distance_table[node] = {}
-            for n in nodes:
-                self.distance_table[node][n] = float('inf')
+    def initialize_distance_table(self, vs):
+        vs = vs.copy()
+        if self._name in vs:
+            vs.remove(self._name)
+        for v in vs:
+            self.distance_table[v] = {}
+            for n in vs:
+                self.distance_table[v][n] = float('inf')
     
     def print_distance_table(self):
-        nodes = sorted(self.distance_table.keys())
-        header = [' '] + nodes
+        vs = sorted(self.distance_table.keys())
+        header = [' '] + vs
 
         print('\t'.join(header))
 
-        for node in nodes:
-            row = [node] + [str(self.distance_table[node][n]).replace('inf', 'INF') for n in nodes]
+        for v in vs:
+            row = [v] + [str(self.distance_table[v][n]).replace('inf', 'INF') for n in vs]
             print('\t'.join(row))
 
     def update_self(self, graph, routers_list):
         neighbors = graph.get_neighbors(self._name)
         for neighbor in neighbors:
-            self.distance_table[neighbor][neighbor] = graph.adj_list[self._name][neighbor]
+            self.distance_table[neighbor][neighbor] = graph.vertex_dict[self._name][neighbor]
 
         for router in routers_list:
             if router._name not in neighbors and router._name != self._name:
@@ -85,9 +85,9 @@ class Router:
             for dest in self.distance_table:
                 if dest == received_from:
                     continue
-                for via_node in self.distance_table[dest]: 
-                    if via_node == received_from: 
-                        previous_cost = self.distance_table[dest][via_node]
+                for via_v in self.distance_table[dest]: 
+                    if via_v == received_from: 
+                        previous_cost = self.distance_table[dest][via_v]
                         cost_to_received_from = self.distance_table[received_from][received_from]
                         total_cost = cost_to_received_from + self.find_min_cost(received_distance_table, dest)[0]
                         self.distance_table[dest][received_from] = total_cost
@@ -104,10 +104,10 @@ class Router:
     def find_min_cost(self, distance_table, dest): 
         min_cost = INF
         next_hop = None
-        for node in distance_table[dest]:
-            if distance_table[dest][node] < min_cost:
-                min_cost = distance_table[dest][node]
-                next_hop = node
+        for v in distance_table[dest]:
+            if distance_table[dest][v] < min_cost:
+                min_cost = distance_table[dest][v]
+                next_hop = v
         return (min_cost, next_hop)
 
     def print_routing_table(self):
@@ -129,9 +129,9 @@ class Router:
                 for dest in router.routing_table: 
                     if dest == self._name: 
                         continue
-                    cost_to_via_node = self.distance_table[router._name][router._name]
-                    via_node_to_dest = router.routing_table[dest][1]
-                    self.distance_table[dest][router._name] = cost_to_via_node + via_node_to_dest
+                    cost_to_via_v = self.distance_table[router._name][router._name]
+                    via_v_to_dest = router.routing_table[dest][1]
+                    self.distance_table[dest][router._name] = cost_to_via_v + via_v_to_dest
         
         if self.distance_table != original_distance_table: 
             self.update_neighbors = True
@@ -142,29 +142,29 @@ class Router:
             print(update)
         print()
 
-nodes_list = []
+vs_list = []
 graph = Graph()
 
-# Read in nodes
+# Read in vs
 line = sys.stdin.readline().strip()
 while line != "START":
-    nodes_list.append(line)
+    vs_list.append(line)
     router = Router(line)
-    graph.adj_list[router._name] = {}
+    graph.vertex_dict[router._name] = {}
     line = sys.stdin.readline().strip()
 
 # Read in edges
 line = sys.stdin.readline().strip()
 while line != "UPDATE":
-    node1, node2, weight = line.split()
-    graph.add_edge(node1, node2, int(weight))
+    v1, v2, weight = line.split()
+    graph.add_edge(v1, v2, int(weight))
     line = sys.stdin.readline().strip()
 
 # Run til convergence
 routers_list = []
-for node in nodes_list:
-    router = Router(node)
-    router.initialize_distance_table(nodes_list)
+for v in vs_list:
+    router = Router(v)
+    router.initialize_distance_table(vs_list)
     router.update_self(graph, routers_list)
     routers_list.append(router)
 
@@ -208,11 +208,11 @@ while True:
     line = sys.stdin.readline().strip()
     if line == "END":
         break
-    node1, node2, weight = line.split()
+    v1, v2, weight = line.split()
     if int(weight) == -1: 
-        graph.remove_edge(node1, node2)
+        graph.remove_edge(v1, v2)
     else: 
-        graph.add_edge(node1, node2, int(weight))
+        graph.add_edge(v1, v2, int(weight))
 
 # Store original distance table
 previous_distance_table = {}
