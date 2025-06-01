@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import sys
-import copy
 import math
 
 INF = math.inf
@@ -52,9 +51,18 @@ class Router:
         self.routing_table = {}
         self.update_neighbors = False
 
+    def deep_copy_distance_table(self, distance_table):
+        """Create a deep copy of a distance table without using copy library."""
+        new_table = {}
+        for dest in distance_table:
+            new_table[dest] = {}
+            for via_node in distance_table[dest]:
+                new_table[dest][via_node] = distance_table[dest][via_node]
+        return new_table
+
     def initialize_distance_table(self, nodes):
         """Initialize distance table with infinite distances to all other nodes."""
-        nodes = nodes.copy()
+        nodes = nodes[:]  # Shallow copy of list
         if self._name in nodes:
             nodes.remove(self._name)
         
@@ -94,7 +102,9 @@ class Router:
         if self.update_neighbors:
             for router in routers_list:
                 if router._name in neighbors:
-                    router.updates_to_process.append((self._name, copy.deepcopy(self.distance_table)))
+                    # Create deep copy manually
+                    copied_table = self.deep_copy_distance_table(self.distance_table)
+                    router.updates_to_process.append((self._name, copied_table))
         self.update_neighbors = False
 
     def process_received_tables(self):
@@ -148,7 +158,7 @@ class Router:
 
     def process_after_update(self, graph, routers_list):
         """Process routing updates after graph topology changes."""
-        original_distance_table = copy.deepcopy(self.distance_table)
+        original_distance_table = self.deep_copy_distance_table(self.distance_table)
         self.updates_to_process = []
         self.update_self(graph, routers_list)
 
@@ -163,8 +173,21 @@ class Router:
                     via_node_to_dest = router.routing_table[dest][1]
                     self.distance_table[dest][router._name] = cost_to_via_node + via_node_to_dest
         
-        if self.distance_table != original_distance_table:
+        if not self.distance_tables_equal(self.distance_table, original_distance_table):
             self.update_neighbors = True
+
+    def distance_tables_equal(self, table1, table2):
+        """Compare two distance tables for equality without using copy library."""
+        if set(table1.keys()) != set(table2.keys()):
+            return False
+        
+        for dest in table1:
+            if set(table1[dest].keys()) != set(table2[dest].keys()):
+                return False
+            for via_node in table1[dest]:
+                if table1[dest][via_node] != table2[dest][via_node]:
+                    return False
+        return True
 
     def print_updates(self):
         """Print pending updates for debugging purposes."""
@@ -216,14 +239,26 @@ def print_initial_distance_tables(routers_list):
         print()
 
 
+def store_distance_tables(routers_list):
+    """Store current distance tables for all routers."""
+    previous_distance_table = {}
+    for router in routers_list:
+        previous_distance_table[router._name] = router.deep_copy_distance_table(router.distance_table)
+    return previous_distance_table
+
+
+def check_convergence(routers_list, previous_distance_table):
+    """Check if all routers have converged."""
+    for router in routers_list:
+        if not router.distance_tables_equal(router.distance_table, previous_distance_table[router._name]):
+            return False
+    return True
+
+
 def run_distance_vector_algorithm(routers_list, graph):
     """Run the distance vector algorithm until convergence."""
     t = 1
-    previous_distance_table = {}
-    
-    # Store initial distance tables
-    for router in routers_list:
-        previous_distance_table[router._name] = copy.deepcopy(router.distance_table)
+    previous_distance_table = store_distance_tables(routers_list)
     
     while True:
         # Send updates to neighbors
@@ -235,13 +270,11 @@ def run_distance_vector_algorithm(routers_list, graph):
             router.process_received_tables()
         
         # Check for convergence
-        if all([router.distance_table == previous_distance_table[router._name] for router in routers_list]):
+        if check_convergence(routers_list, previous_distance_table):
             break
         
         # Store current distance tables
-        previous_distance_table = {}
-        for router in routers_list:
-            previous_distance_table[router._name] = copy.deepcopy(router.distance_table)
+        previous_distance_table = store_distance_tables(routers_list)
         
         # Print current distance tables
         for router in routers_list:
@@ -281,16 +314,14 @@ def process_graph_updates(graph):
 def handle_topology_changes(routers_list, graph, t):
     """Handle topology changes and re-run algorithm if needed."""
     # Store original distance tables
-    previous_distance_table = {}
-    for router in routers_list:
-        previous_distance_table[router._name] = copy.deepcopy(router.distance_table)
+    previous_distance_table = store_distance_tables(routers_list)
 
     # Process initial changes to graph
     for router in routers_list:
         router.process_after_update(graph, routers_list)
 
     # If nothing changed, exit
-    if all([router.distance_table == previous_distance_table[router._name] for router in routers_list]):
+    if check_convergence(routers_list, previous_distance_table):
         sys.exit()
 
     # Print distance tables after topology change
@@ -302,9 +333,7 @@ def handle_topology_changes(routers_list, graph, t):
     t += 1
 
     # Run algorithm again until convergence
-    previous_distance_table = {}
-    for router in routers_list:
-        previous_distance_table[router._name] = copy.deepcopy(router.distance_table)
+    previous_distance_table = store_distance_tables(routers_list)
     
     while True:
         for router in routers_list:
@@ -313,12 +342,10 @@ def handle_topology_changes(routers_list, graph, t):
             router.process_received_tables()
         
         # Check for convergence
-        if all([router.distance_table == previous_distance_table[router._name] for router in routers_list]):
+        if check_convergence(routers_list, previous_distance_table):
             break
         
-        previous_distance_table = {}
-        for router in routers_list:
-            previous_distance_table[router._name] = copy.deepcopy(router.distance_table)
+        previous_distance_table = store_distance_tables(routers_list)
         
         # Print distance tables
         for router in routers_list:
