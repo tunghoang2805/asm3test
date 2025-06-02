@@ -1,304 +1,222 @@
-#!/usr/bin/env python3
-
 import sys
-import copy
+from collections import defaultdict
 
-class Router:
-    def __init__(self, name):
-        self.name = name
-        self.neighbors = {}  # direct neighbors and their costs
-        self.distance_table = {}  # distance_table[dest][via] = cost
-        self.routing_table = {}  # routing_table[dest] = (next_hop, cost)
-        self.received_updates = []
+class DistanceVectorRouter:
+    def __init__(self):
+        self.routers = set()
+        self.topology = defaultdict(dict)  # topology[router1][router2] = cost
+        self.distance_tables = {}  # distance_tables[router][dest][next_hop] = cost
+        self.routing_tables = {}   # routing_tables[router][dest] = (next_hop, cost)
         
-    def initialize_distance_table(self, all_routers):
-        """Initialize distance table with all destinations except self"""
-        destinations = [r for r in all_routers if r != self.name]
-        for dest in destinations:
-            self.distance_table[dest] = {}
-            for via in destinations:
-                self.distance_table[dest][via] = float('inf')
+    def add_router(self, name):
+        """Add a router to the network"""
+        self.routers.add(name)
+        if name not in self.distance_tables:
+            self.distance_tables[name] = defaultdict(dict)
+        if name not in self.routing_tables:
+            self.routing_tables[name] = {}
     
-    def update_direct_neighbors(self, graph):
-        """Update distance table with direct neighbor costs"""
-        self.neighbors = graph.get(self.name, {}).copy()
+    def add_link(self, router1, router2, cost):
+        """Add or update a link between two routers"""
+        if cost == -1:
+            # Remove link
+            if router1 in self.topology and router2 in self.topology[router1]:
+                del self.topology[router1][router2]
+            if router2 in self.topology and router1 in self.topology[router2]:
+                del self.topology[router2][router1]
+        else:
+            # Add/update link
+            self.add_router(router1)
+            self.add_router(router2)
+            self.topology[router1][router2] = cost
+            self.topology[router2][router1] = cost
+    
+    def initialize_distance_tables(self):
+        """Initialize distance tables for all routers"""
+        for router in self.routers:
+            self.distance_tables[router] = defaultdict(dict)
+            for dest in self.routers:
+                if dest != router:
+                    for next_hop in self.routers:
+                        if next_hop != router:
+                            if next_hop in self.topology[router]:
+                                if next_hop == dest:
+                                    # Direct connection
+                                    self.distance_tables[router][dest][next_hop] = self.topology[router][next_hop]
+                                else:
+                                    # Initialize to infinity for non-direct connections
+                                    self.distance_tables[router][dest][next_hop] = float('inf')
+                            else:
+                                # No direct connection to next_hop
+                                self.distance_tables[router][dest][next_hop] = float('inf')
+    
+    def get_distance_vector(self, router):
+        """Get the distance vector for a router (minimum distances to all destinations)"""
+        vector = {}
+        for dest in self.routers:
+            if dest != router:
+                min_cost = float('inf')
+                for next_hop in self.distance_tables[router][dest]:
+                    if self.distance_tables[router][dest][next_hop] < min_cost:
+                        min_cost = self.distance_tables[router][dest][next_hop]
+                vector[dest] = min_cost
+        return vector
+    
+    def update_distance_table(self, router, neighbor, neighbor_vector):
+        """Update distance table based on neighbor's distance vector"""
+        if neighbor not in self.topology[router]:
+            return False
         
-        # Update distance table for direct neighbors
-        for dest in self.distance_table:
-            if dest in self.neighbors:
-                self.distance_table[dest][dest] = self.neighbors[dest]
-            else:
-                # Set to infinity if no direct connection
-                self.distance_table[dest][dest] = float('inf')
-    
-    def send_distance_vector(self, all_routers):
-        """Send distance vector to all neighbors"""
-        updates = []
-        for neighbor in self.neighbors:
-            # Create distance vector (minimum costs to each destination)
-            distance_vector = {}
-            for dest in self.distance_table:
-                min_cost = min(self.distance_table[dest].values())
-                distance_vector[dest] = min_cost
-            
-            updates.append((neighbor, self.name, distance_vector))
-        return updates
-    
-    def receive_update(self, from_router, distance_vector):
-        """Receive distance vector from a neighbor"""
-        self.received_updates.append((from_router, distance_vector))
-    
-    def process_updates(self):
-        """Process all received updates and update distance table"""
         changed = False
+        link_cost = self.topology[router][neighbor]
         
-        for from_router, distance_vector in self.received_updates:
-            if from_router not in self.neighbors:
-                continue
-                
-            cost_to_neighbor = self.neighbors[from_router]
-            
-            # Update distance table
-            for dest in distance_vector:
-                if dest == self.name:
-                    continue
-                    
-                new_cost = cost_to_neighbor + distance_vector[dest]
-                old_cost = self.distance_table[dest].get(from_router, float('inf'))
+        for dest in neighbor_vector:
+            if dest != router:  # Don't update route to self
+                new_cost = link_cost + neighbor_vector[dest]
+                old_cost = self.distance_tables[router][dest].get(neighbor, float('inf'))
                 
                 if new_cost != old_cost:
-                    self.distance_table[dest][from_router] = new_cost
+                    self.distance_tables[router][dest][neighbor] = new_cost
                     changed = True
         
-        self.received_updates = []
         return changed
     
-    def update_routing_table(self):
-        """Update routing table based on current distance table"""
-        self.routing_table = {}
+    def print_distance_table(self, router, step):
+        """Print distance table for a router at given step"""
+        print(f"Distance Table of router {router} at t={step}:")
         
-        for dest in self.distance_table:
-            min_cost = float('inf')
-            best_next_hop = None
-            
-            # Find the best next hop (minimum cost, then alphabetical)
-            for via in sorted(self.distance_table[dest].keys()):
-                cost = self.distance_table[dest][via]
-                if cost < min_cost:
-                    min_cost = cost
-                    best_next_hop = via
-            
-            if min_cost == float('inf'):
-                self.routing_table[dest] = ('INF', 'INF')
-            else:
-                self.routing_table[dest] = (best_next_hop, min_cost)
-    
-    def print_distance_table(self, t):
-        """Print distance table in required format"""
-        destinations = sorted(self.distance_table.keys())
+        # Get sorted list of other routers
+        other_routers = sorted([r for r in self.routers if r != router])
         
-        print(f"Distance Table of router {self.name} at t={t}:")
+        if not other_routers:
+            print()
+            return
         
-        # Header
-        header = "  " + "   ".join(destinations)
+        # Print header
+        header = "  " + "   ".join(other_routers)
         print(header)
         
-        # Rows
-        for dest in destinations:
-            row = dest + " "
-            for via in destinations:
-                cost = self.distance_table[dest][via]
-                cost_str = "INF" if cost == float('inf') else str(int(cost))
-                row += cost_str + "   "
+        # Print rows
+        for dest in other_routers:
+            row = f"{dest} "
+            for next_hop in other_routers:
+                cost = self.distance_tables[router][dest].get(next_hop, float('inf'))
+                cost_str = "INF" if cost == float('inf') else str(cost)
+                row += f"{cost_str:<3} "
             print(row.rstrip())
-        print()
-    
-    def print_routing_table(self):
-        """Print routing table in required format"""
-        print(f"Routing Table of router {self.name}:")
         
-        for dest in sorted(self.routing_table.keys()):
-            next_hop, cost = self.routing_table[dest]
-            if cost == 'INF':
-                print(f"{dest},INF,INF")
+        print()  # Blank line
+    
+    def update_routing_table(self, router):
+        """Update routing table based on current distance table"""
+        self.routing_tables[router] = {}
+        
+        for dest in self.routers:
+            if dest != router:
+                min_cost = float('inf')
+                best_next_hop = None
+                
+                # Find the best next hop (minimum cost, then alphabetical)
+                next_hops = sorted(self.distance_tables[router][dest].keys())
+                for next_hop in next_hops:
+                    cost = self.distance_tables[router][dest][next_hop]
+                    if cost < min_cost:
+                        min_cost = cost
+                        best_next_hop = next_hop
+                
+                if best_next_hop is not None:
+                    self.routing_tables[router][dest] = (best_next_hop, min_cost)
+                else:
+                    self.routing_tables[router][dest] = ("INF", float('inf'))
+    
+    def print_routing_table(self, router):
+        """Print routing table for a router"""
+        print(f"Routing Table of router {router}:")
+        
+        destinations = sorted([r for r in self.routers if r != router])
+        for dest in destinations:
+            if dest in self.routing_tables[router]:
+                next_hop, cost = self.routing_tables[router][dest]
+                if cost == float('inf'):
+                    print(f"{dest},INF,INF")
+                else:
+                    print(f"{dest},{next_hop},{cost}")
             else:
-                print(f"{dest},{next_hop},{int(cost)}")
-        print()
+                print(f"{dest},INF,INF")
+        
+        print()  # Blank line
+    
+    def run_algorithm(self):
+        """Run the distance vector algorithm until convergence"""
+        if not self.routers:
+            return
+        
+        self.initialize_distance_tables()
+        step = 0
+        
+        while True:
+            # Print distance tables for current step
+            for router in sorted(self.routers):
+                self.print_distance_table(router, step)
+            
+            # Exchange distance vectors and update tables
+            changed = False
+            
+            for router in self.routers:
+                router_vector = self.get_distance_vector(router)
+                
+                # Send vector to all neighbors
+                for neighbor in self.topology[router]:
+                    if self.update_distance_table(neighbor, router, router_vector):
+                        changed = True
+            
+            step += 1
+            
+            # Check for convergence
+            if not changed:
+                break
+        
+        # Update and print final routing tables
+        for router in sorted(self.routers):
+            self.update_routing_table(router)
+            self.print_routing_table(router)
 
-def read_input():
-    """Read and parse input"""
-    routers = []
+def main():
+    dv = DistanceVectorRouter()
     
     # Read router names
     while True:
         line = input().strip()
         if line == "START":
             break
-        routers.append(line)
+        dv.add_router(line)
     
     # Read initial topology
-    graph = {}
     while True:
         line = input().strip()
         if line == "UPDATE":
             break
-        
         parts = line.split()
-        router1, router2, weight = parts[0], parts[1], int(parts[2])
-        
-        if router1 not in graph:
-            graph[router1] = {}
-        if router2 not in graph:
-            graph[router2] = {}
-        
-        if weight == -1:
-            # Remove edge
-            graph[router1].pop(router2, None)
-            graph[router2].pop(router1, None)
-        else:
-            # Add edge
-            graph[router1][router2] = weight
-            graph[router2][router1] = weight
+        router1, router2, cost = parts[0], parts[1], int(parts[2])
+        dv.add_link(router1, router2, cost)
+    
+    # Run algorithm for initial topology
+    dv.run_algorithm()
     
     # Read updates
-    updates = []
+    has_updates = False
     while True:
         line = input().strip()
         if line == "END":
             break
-        
+        has_updates = True
         parts = line.split()
-        router1, router2, weight = parts[0], parts[1], int(parts[2])
-        updates.append((router1, router2, weight))
+        router1, router2, cost = parts[0], parts[1], int(parts[2])
+        dv.add_link(router1, router2, cost)
     
-    return routers, graph, updates
-
-def run_distance_vector(routers, graph):
-    """Run distance vector algorithm until convergence"""
-    router_objects = {}
-    
-    # Create router objects
-    for name in routers:
-        router_objects[name] = Router(name)
-        router_objects[name].initialize_distance_table(routers)
-        router_objects[name].update_direct_neighbors(graph)
-    
-    t = 0
-    
-    # Print initial distance tables
-    for name in sorted(routers):
-        router_objects[name].print_distance_table(t)
-    
-    # Run until convergence
-    while True:
-        t += 1
-        
-        # Collect all updates
-        all_updates = []
-        for name in sorted(routers):
-            updates = router_objects[name].send_distance_vector(routers)
-            all_updates.extend(updates)
-        
-        # Deliver updates
-        for neighbor, sender, distance_vector in all_updates:
-            if neighbor in router_objects:
-                router_objects[neighbor].receive_update(sender, distance_vector)
-        
-        # Process updates
-        any_changed = False
-        for name in routers:
-            changed = router_objects[name].process_updates()
-            if changed:
-                any_changed = True
-        
-        if not any_changed:
-            break
-        
-        # Print distance tables
-        for name in sorted(routers):
-            router_objects[name].print_distance_table(t)
-    
-    # Update and print routing tables
-    for name in sorted(routers):
-        router_objects[name].update_routing_table()
-        router_objects[name].print_routing_table()
-    
-    return router_objects
-
-def apply_updates(router_objects, graph, updates):
-    """Apply topology updates and re-run algorithm"""
-    # Apply updates to graph
-    for router1, router2, weight in updates:
-        if router1 not in graph:
-            graph[router1] = {}
-        if router2 not in graph:
-            graph[router2] = {}
-        
-        if weight == -1:
-            # Remove edge
-            graph[router1].pop(router2, None)
-            graph[router2].pop(router1, None)
-        else:
-            # Add/update edge
-            graph[router1][router2] = weight
-            graph[router2][router1] = weight
-    
-    # Update router neighbor information
-    for name, router in router_objects.items():
-        router.update_direct_neighbors(graph)
-    
-    # Re-run distance vector algorithm
-    routers = sorted(router_objects.keys())
-    t = 0
-    
-    # Print initial distance tables after update
-    for name in routers:
-        router_objects[name].print_distance_table(t)
-    
-    # Run until convergence
-    while True:
-        t += 1
-        
-        # Collect all updates
-        all_updates = []
-        for name in routers:
-            updates = router_objects[name].send_distance_vector(routers)
-            all_updates.extend(updates)
-        
-        # Deliver updates
-        for neighbor, sender, distance_vector in all_updates:
-            if neighbor in router_objects:
-                router_objects[neighbor].receive_update(sender, distance_vector)
-        
-        # Process updates
-        any_changed = False
-        for name in routers:
-            changed = router_objects[name].process_updates()
-            if changed:
-                any_changed = True
-        
-        if not any_changed:
-            break
-        
-        # Print distance tables
-        for name in routers:
-            router_objects[name].print_distance_table(t)
-    
-    # Update and print routing tables
-    for name in routers:
-        router_objects[name].update_routing_table()
-        router_objects[name].print_routing_table()
-
-def main():
-    # Read input
-    routers, graph, updates = read_input()
-    
-    # Run initial distance vector algorithm
-    router_objects = run_distance_vector(routers, graph)
-    
-    # Apply updates if any
-    if updates:
-        apply_updates(router_objects, graph, updates)
+    # Run algorithm again if there were updates
+    if has_updates:
+        dv.run_algorithm()
 
 if __name__ == "__main__":
     main()
