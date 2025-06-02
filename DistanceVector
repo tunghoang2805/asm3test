@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import sys
 import copy
 import math
@@ -10,11 +8,13 @@ class Graph:
     def __init__(self):
         self.adj_list = {}
     
+    def add_node(self, node):
+        if node not in self.adj_list:
+            self.adj_list[node] = {}
+    
     def add_edge(self, node1, node2, weight):
-        if node1 not in self.adj_list:
-            self.adj_list[node1] = {}
-        if node2 not in self.adj_list:
-            self.adj_list[node2] = {}
+        self.add_node(node1)
+        self.add_node(node2)
         self.adj_list[node1][node2] = weight
         self.adj_list[node2][node1] = weight
     
@@ -25,237 +25,250 @@ class Graph:
             del self.adj_list[node2][node1]
     
     def get_neighbors(self, node):
-        return self.adj_list.get(node, {})
+        return self.adj_list.get(node, {}).keys()
     
-    def get_all_nodes(self):
-        return set(self.adj_list.keys())
+    def get_nodes(self):
+        return sorted(self.adj_list.keys())
 
 class Router:
     def __init__(self, name):
         self.name = name
         self.distance_table = {}
+        self.updates_to_process = []
         self.routing_table = {}
-        self.neighbors = {}
+        self.update_needed = False
     
-    def initialize_distance_table(self, all_nodes):
-        # Initialize distance table for all nodes except self
-        nodes = [n for n in all_nodes if n != self.name]
-        self.distance_table = {}
-        
+    def initialize_distance_table(self, nodes):
+        nodes = sorted(nodes)
         for dest in nodes:
+            if dest == self.name:
+                continue
             self.distance_table[dest] = {}
             for via in nodes:
+                if via == self.name:
+                    continue
                 self.distance_table[dest][via] = INF
     
-    def update_direct_neighbors(self, graph):
-        # Update distances to direct neighbors
-        self.neighbors = graph.get_neighbors(self.name)
+    def add_missing_nodes(self, current_nodes):
+        existing_nodes = set(self.distance_table.keys())
+        new_nodes = sorted(set(current_nodes) - existing_nodes)
         
-        for neighbor, cost in self.neighbors.items():
-            if neighbor in self.distance_table:
-                self.distance_table[neighbor][neighbor] = cost
-    
-    def print_distance_table(self, t):
-        nodes = sorted([n for n in self.distance_table.keys()])
-        
-        print(f"Distance Table of router {self.name} at t={t}:")
-        
-        if not nodes:
-            print()
-            return
-        
-        # Print header
-        header = "  " + "   ".join(nodes)
-        print(header)
-        
-        # Print rows
-        for dest in nodes:
-            row_values = []
-            for via in nodes:
-                if self.distance_table[dest][via] == INF:
-                    row_values.append("INF")
-                else:
-                    row_values.append(str(int(self.distance_table[dest][via])))
-            
-            row = dest + " " + "   ".join(row_values)
-            print(row)
-        
-        print()
-    
-    def create_routing_table(self):
-        self.routing_table = {}
+        for dest in new_nodes:
+            if dest == self.name:
+                continue
+            self.distance_table[dest] = {}
+            for via in current_nodes:
+                if via == self.name:
+                    continue
+                self.distance_table[dest][via] = INF
         
         for dest in self.distance_table:
+            for via in new_nodes:
+                if via == self.name:
+                    continue
+                if via not in self.distance_table[dest]:
+                    self.distance_table[dest][via] = INF
+    
+    def update_self(self, graph):
+        neighbors = graph.get_neighbors(self.name)
+        for dest in self.distance_table:
+            if dest in neighbors:
+                self.distance_table[dest][dest] = graph.adj_list[self.name].get(dest, INF)
+            else:
+                self.distance_table[dest][dest] = INF
+    
+    def send_updates(self, graph, routers):
+        neighbors = graph.get_neighbors(self.name)
+        for neighbor in neighbors:
+            if neighbor == self.name:
+                continue
+            for router in routers:
+                if router.name == neighbor:
+                    router.updates_to_process.append((
+                        self.name,
+                        copy.deepcopy(self.distance_table)
+                    ))
+    
+    def process_updates(self, graph):
+        updated = False
+        while self.updates_to_process:
+            source, table = self.updates_to_process.pop(0)
+            for dest in self.distance_table:
+                if dest == self.name:
+                    continue
+                current_cost = self.distance_table[dest].get(source, INF)
+                link_cost = graph.adj_list[self.name].get(source, INF)
+                if link_cost == INF:
+                    continue
+                reported_cost = table[dest].get(source, INF)
+                new_cost = link_cost + reported_cost
+                
+                if new_cost < current_cost:
+                    self.distance_table[dest][source] = new_cost
+                    updated = True
+        if updated:
+            self.update_needed = True
+    
+    def compute_routing_table(self):
+        self.routing_table.clear()
+        for dest in sorted(self.distance_table.keys()):
             min_cost = INF
             next_hop = None
-            
-            # Find minimum cost path
             for via in sorted(self.distance_table[dest].keys()):
-                if self.distance_table[dest][via] < min_cost:
-                    min_cost = self.distance_table[dest][via]
+                cost = self.distance_table[dest][via]
+                if cost < min_cost or (cost == min_cost and via < next_hop):
+                    min_cost = cost
                     next_hop = via
-            
             if min_cost == INF:
-                self.routing_table[dest] = ("INF", "INF")
+                self.routing_table[dest] = ('INF', 'INF')
             else:
-                self.routing_table[dest] = (next_hop, int(min_cost))
+                self.routing_table[dest] = (next_hop, min_cost)
     
-    def print_routing_table(self):
-        self.create_routing_table()
-        print(f"Routing Table of router {self.name}:")
-        
-        for dest in sorted(self.routing_table.keys()):
-            next_hop, cost = self.routing_table[dest]
-            print(f"{dest},{next_hop},{cost}")
-        
+    def print_distance_table(self, t):
+        nodes = sorted([n for n in self.distance_table.keys() if n != self.name])
+        print(f"Distance Table of router {self.name} at t={t}:")
+        header = "\t".join([""] + nodes)
+        print(header)
+        for via in sorted(self.distance_table.keys()):
+            if via == self.name:
+                continue
+            row = [via]
+            for dest in nodes:
+                cost = self.distance_table[dest].get(via, INF)
+                row.append(str(int(cost)) if cost != INF else "INF")
+            print("\t".join(row))
         print()
     
-    def get_distance_vector(self):
-        # Return distance vector (minimum costs to all destinations)
-        vector = {}
-        for dest in self.distance_table:
-            min_cost = INF
-            for via in self.distance_table[dest]:
-                if self.distance_table[dest][via] < min_cost:
-                    min_cost = self.distance_table[dest][via]
-            vector[dest] = min_cost
-        return vector
-
-def run_distance_vector_algorithm(graph, routers):
-    t = 0
-    
-    # Print initial state
-    for router_name in sorted(routers.keys()):
-        routers[router_name].print_distance_table(t)
-    
-    converged = False
-    
-    while not converged:
-        t += 1
-        converged = True
-        
-        # Store previous state
-        previous_tables = {}
-        for router_name, router in routers.items():
-            previous_tables[router_name] = copy.deepcopy(router.distance_table)
-        
-        # Each router sends its distance vector to neighbors
-        for router_name, router in routers.items():
-            distance_vector = router.get_distance_vector()
-            
-            # Send to all neighbors
-            for neighbor_name in router.neighbors:
-                if neighbor_name in routers:
-                    neighbor_router = routers[neighbor_name]
-                    
-                    # Update neighbor's distance table
-                    for dest in distance_vector:
-                        if dest != neighbor_name:  # Don't update route to self
-                            cost_to_router = neighbor_router.neighbors.get(router_name, INF)
-                            new_cost = cost_to_router + distance_vector[dest]
-                            
-                            if dest in neighbor_router.distance_table:
-                                old_cost = neighbor_router.distance_table[dest][router_name]
-                                neighbor_router.distance_table[dest][router_name] = new_cost
-                                
-                                if old_cost != new_cost:
-                                    converged = False
-        
-        # Check if any table changed
-        for router_name, router in routers.items():
-            if router.distance_table != previous_tables[router_name]:
-                converged = False
-        
-        # Print current state if not converged
-        if not converged:
-            for router_name in sorted(routers.keys()):
-                routers[router_name].print_distance_table(t)
+    def print_routing_table(self):
+        self.compute_routing_table()
+        print(f"Routing Table of router {self.name}:")
+        for dest in sorted(self.routing_table.keys()):
+            next_hop, cost = self.routing_table[dest]
+            print(f"{dest},{next_hop},{cost if cost != INF else 'INF'}")
+        print()
 
 def main():
-    # Read router names
-    router_names = []
-    while True:
-        line = input().strip()
-        if line == "START":
-            break
-        router_names.append(line)
-    
-    # Initialize graph and routers
     graph = Graph()
     routers = {}
     
-    for name in router_names:
-        graph.adj_list[name] = {}
-        routers[name] = Router(name)
-    
-    # Read initial edges
+    # Read nodes
+    nodes = []
     while True:
-        line = input().strip()
+        line = sys.stdin.readline().strip()
+        if line == "START":
+            break
+        nodes.append(line)
+        graph.add_node(line)
+        routers[line] = Router(line)
+    
+    # Read edges
+    while True:
+        line = sys.stdin.readline().strip()
         if line == "UPDATE":
             break
-        
-        parts = line.split()
-        node1, node2, weight = parts[0], parts[1], int(parts[2])
-        
-        if weight == -1:
-            graph.remove_edge(node1, node2)
-        else:
+        if not line:
+            continue
+        node1, node2, weight = line.split()
+        weight = int(weight)
+        if weight != -1:
             graph.add_edge(node1, node2, weight)
+        else:
+            graph.remove_edge(node1, node2)
     
-    # Initialize distance tables
-    all_nodes = set(router_names)
+    # Initialize routers
+    current_nodes = graph.get_nodes()
     for router in routers.values():
-        router.initialize_distance_table(all_nodes)
-        router.update_direct_neighbors(graph)
+        router.initialize_distance_table(current_nodes)
+        router.update_self(graph)
     
-    # Run initial algorithm
-    run_distance_vector_algorithm(graph, routers)
-    
-    # Print initial routing tables
-    for router_name in sorted(routers.keys()):
-        routers[router_name].print_routing_table()
-    
-    # Process updates
-    updates_made = False
+    # Run initial convergence
+    t = 0
     while True:
-        line = input().strip()
-        if line == "END":
+        # Print current state
+        for router in sorted(routers.values(), key=lambda x: x.name):
+            router.print_distance_table(t)
+        
+        # Check convergence
+        all_stable = True
+        for router in routers.values():
+            if router.update_needed:
+                all_stable = False
+                break
+        if all_stable and t > 0:
             break
         
-        updates_made = True
-        parts = line.split()
-        node1, node2, weight = parts[0], parts[1], int(parts[2])
+        # Send updates
+        for router in routers.values():
+            router.send_updates(graph, routers.values())
         
-        # Add new nodes if they don't exist
-        if node1 not in graph.adj_list:
-            graph.adj_list[node1] = {}
-            routers[node1] = Router(node1)
-            all_nodes.add(node1)
+        # Process updates
+        for router in routers.values():
+            router.process_updates(graph)
+            router.update_needed = False
         
-        if node2 not in graph.adj_list:
-            graph.adj_list[node2] = {}
-            routers[node2] = Router(node2)
-            all_nodes.add(node2)
+        t += 1
+    
+    # Print initial routing tables
+    for router in sorted(routers.values(), key=lambda x: x.name):
+        router.print_routing_table()
+    
+    # Process updates
+    while True:
+        line = sys.stdin.readline().strip()
+        if line == "END":
+            break
+        if not line:
+            continue
+        node1, node2, weight = line.split()
+        weight = int(weight)
         
-        # Update graph
         if weight == -1:
             graph.remove_edge(node1, node2)
         else:
             graph.add_edge(node1, node2, weight)
-    
-    # If updates were made, reinitialize and run algorithm again
-    if updates_made:
-        # Reinitialize all routers with new node set
-        for router in routers.values():
-            router.initialize_distance_table(all_nodes)
-            router.update_direct_neighbors(graph)
         
-        # Run algorithm again
-        run_distance_vector_algorithm(graph, routers)
+        # Add new nodes to routers
+        for node in [node1, node2]:
+            if node not in routers:
+                routers[node] = Router(node)
+        
+        # Update all routers' distance tables
+        current_nodes = graph.get_nodes()
+        for router in routers.values():
+            router.add_missing_nodes(current_nodes)
+            router.update_self(graph)
+    
+    # Run convergence after updates
+    if graph.get_nodes():
+        t = 0
+        while True:
+            # Print current state
+            for router in sorted(routers.values(), key=lambda x: x.name):
+                router.print_distance_table(t)
+            
+            # Check convergence
+            all_stable = True
+            for router in routers.values():
+                if router.update_needed:
+                    all_stable = False
+                    break
+            if all_stable and t > 0:
+                break
+            
+            # Send updates
+            for router in routers.values():
+                router.send_updates(graph, routers.values())
+            
+            # Process updates
+            for router in routers.values():
+                router.process_updates(graph)
+                router.update_needed = False
+            
+            t += 1
         
         # Print final routing tables
-        for router_name in sorted(routers.keys()):
-            routers[router_name].print_routing_table()
+        for router in sorted(routers.values(), key=lambda x: x.name):
+            router.print_routing_table()
 
 if __name__ == "__main__":
     main()
