@@ -119,10 +119,13 @@ class Router:
             print(f"{dest},{next_hop},{cost}")
         print()
 
+t = 0
+
 def run_distance_vector(graph, routers):
-    t = 1
+    global t
     
     while True:
+        t += 1
         # Store previous state manually
         prev_tables = {}
         for router in routers:
@@ -167,9 +170,7 @@ def run_distance_vector(graph, routers):
         for router in routers:
             print(f"Distance Table of router {router.name} at t={t}:")
             router.print_distance_table()
-            print()
-        
-        t += 1
+            print() 
     
     return t
 
