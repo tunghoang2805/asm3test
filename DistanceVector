@@ -121,7 +121,9 @@ class Router:
 
 t = 0
 
-def run_distance_vector(graph, routers):    
+def run_distance_vector(graph, routers):
+    global t
+    
     while True:
         t += 1
         # Store previous state manually
