@@ -45,7 +45,6 @@ class Router:
 
     def update_from_graph(self, graph, all_routers):
         neighbors = graph.get_neighbors(self.name)
-        old_changed = self.changed
         
         # Update direct neighbor costs
         for neighbor, cost in neighbors.items():
