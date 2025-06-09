@@ -167,7 +167,7 @@ def main():
     
     # Initialize distance tables
     for router in routers.values():
-        router.initialize_distance_table(router_names, graph)
+        router.init_distance_table(router_names, graph)
     
     # Run initial convergence
     time_step = 0
@@ -243,7 +243,7 @@ def main():
     # Reinitialize all routers after topology change
     router_names.sort()
     for router in routers.values():
-        router.initialize_distance_table(router_names, graph)
+        router.init_distance_table(router_names, graph)
     
     # Print state after update
     for name in sorted(router_names):
