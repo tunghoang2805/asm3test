@@ -118,10 +118,9 @@ class Router:
             print(f"{dest},{next_hop},{cost}")
         print()
 
-t = 0
 
 def run_distance_vector(graph, routers):
-    global t
+    t=0
     
     while True:
         t += 1
