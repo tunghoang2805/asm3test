@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import math
 import sys
 INF = math.inf
@@ -186,10 +184,10 @@ def main():
         updates = []
         for router in routers.values():
             if router.changed:
-                neighbors = graph.get_neighbors(router.name)
+                neighbors = graph.get_neighbors(router.router_id)
                 for neighbor_name in neighbors:
                     if neighbor_name in routers:
-                        updates.append((neighbor_name, router.name, router.get_distance_table_copy()))
+                        updates.append((neighbor_name, router.router_id, router.copy_distance_table()))
                 router.changed = False
         
         # Process all updates
@@ -258,10 +256,10 @@ def main():
         updates = []
         for router in routers.values():
             if router.changed:
-                neighbors = graph.get_neighbors(router.name)
+                neighbors = graph.get_neighbors(router.router_id)
                 for neighbor_name in neighbors:
                     if neighbor_name in routers:
-                        updates.append((neighbor_name, router.name, router.get_distance_table_copy()))
+                        updates.append((neighbor_name, router.router_id, router.copy_distance_table()))
                 router.changed = False
         
         for receiver_name, sender_name, distance_table in updates:
